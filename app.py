@@ -52,20 +52,30 @@ if main_file:
             type=["xlsx"]
         )
 
-    def map_pallet_type(value):
-        value = str(value).strip()
+         
+def map_pallet_type(value):
+    value = str(value).strip().upper()
 
-        pallet_map = {
-            "03": "CHEP 03 - Euro",
-            "01": "CHEP 01 - UK",
-            "3-B1208A": "CHEP 03 - Euro"
-        }
+    if (
+        "PALLET 1000X1200 MM" in value
+        or "1-B1210A" in value
+        or value == "01"
+    ):
+        return "CHEP 01 - UK"
 
-        for key, mapped_value in pallet_map.items():
-            if key in value:
-                return mapped_value
+    elif (
+        "3-B1208A" in value
+        or value == "03"
+    ):
+        return "CHEP 03 - Euro"
 
-        return value
+    elif (
+        "8-B0806A" in value
+        or value == "08"
+    ):
+        return "CHEP 08 - Half"
+
+    return value    
 
     if st.button("Generate Tracking File"):
 
