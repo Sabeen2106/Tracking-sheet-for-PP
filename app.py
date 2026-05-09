@@ -15,169 +15,24 @@ business_unit_map = {
     "Netherlands": {"Sender Name": "Netherlands", "Sender Location Id": "0100646888"},
     "Spain": {"Sender Name": "Spain", "Sender Location Id": "5000449357"},
     "HQ": {"Sender Name": "HQ", "Sender Location Id": "1000358868"},
-    "Coca-Cola HBC Northern Ireland Ltd": {"Sender Name": "Coca-Cola HBC Northern Ireland Ltd", "Sender Location Id": "5000513592"}
+    "Coca-Cola HBC Northern Ireland Ltd": {
+        "Sender Name": "Coca-Cola HBC Northern Ireland Ltd",
+        "Sender Location Id": "5000513592"
+    }
 }
 
 # =========================
-# USER INPUTS
+# FUNCTIONS
 # =========================
-business_unit = input("Enter Business Unit: ")
-
-if business_unit not in business_unit_map:
-    raise ValueError(" Invalid Business Unit")
-
-batch_number = input("Enter Batch Number: ")
-
-# =========================
-# LOAD MAIN FILE
-# =========================
-df = pd.read_excel("/content/060526 CCH CHEP.xlsx")
-
-# Clean columns
-df.columns = df.columns.str.strip().str.replace('\xa0', '', regex=True)
-
-# Rename required fields
-df.rename(columns={
-    'Customer': 'Customer',
-    'Delivery': 'Reference',
-    'Billing doc. date': 'Date'
-}, inplace=True)
-
-# Ensure clean key
-df['Customer'] = df['Customer'].astype(str).str.strip()
-
-# =========================
-# LOAD LOOKUP FILE (XLOOKUP SOURCE)
-# =========================
-lookup_df = pd.read_excel("/content/CCH IPP and CHEP.xlsx")
-
-lookup_df.columns = lookup_df.columns.str.strip().str.replace('\xa0', '', regex=True)
-
-lookup_df.rename(columns={
-    'Customer': 'Customer',
-    'Location ID': 'Location Id'
-}, inplace=True)
-
-lookup_df['Customer'] = lookup_df['Customer'].astype(str).str.strip()
-
-# =========================
-# XLOOKUP (CORRECT LEFT JOIN)
-# =========================
-df = df.merge(
-    lookup_df[['Customer', 'Location Id']],
-    on='Customer',
-    how='left'
-)
-
-# =========================
-# VALIDATION CHECK (IMPORTANT)
-# =========================
-if 'Location Id' not in df.columns:
-    raise ValueError(" Location Id not created from lookup")
-
-# =========================
-# FIX PALLET TYPE
-# =========================
-df['Pallet Type'] = 'CHEP 01 - UK'
-
-
-'''# =========================
-# FIX EXCEL SERIAL DATE
-# =========================
-
-df['Date'] = pd.to_datetime(
-    df['Date'],
-    unit='D',
-    origin='1899-12-30',
-    errors='coerce'
-)
-
-df['Date'] = df['Date'].dt.strftime('%d/%m/%Y')'''
-
-# =========================
-# BUILD TRACKING FILE
-# =========================
-tracking_df = pd.DataFrame()
-
-tracking_df['Movement Date'] = df['Date']
-tracking_df['Business Unit'] = business_unit
-tracking_df['Pooler'] = 'CHEP'
-tracking_df['Movement Direction'] = 'Out'
-tracking_df['Pallet Type'] = df['Pallet Type']
-tracking_df['Reference 1'] = df['Reference']
-tracking_df['Reference 2'] = ''
-tracking_df['Reference 3'] = ''
-tracking_df['Batch Number'] = batch_number
-
-# Sender
-tracking_df['Sender Location Id'] = business_unit_map[business_unit]['Sender Location Id']
-tracking_df['Sender Name'] = business_unit_map[business_unit]['Sender Name']
-tracking_df['Sender Town'] = ''
-tracking_df['Sender Postcode'] = ''
-
-# Receiver (FROM LOOKUP)
-tracking_df['Receiver Location Id'] = df['Location Id']
-tracking_df['Receiver Name'] = df['Customer']
-tracking_df['Receiver Town'] = ''
-tracking_df['Receiver Postcode'] = ''
-
-# Movement
-tracking_df['Movement Type'] = 'Out - CHEP Drop Point'
-tracking_df['Quantity'] = df['Quantity']
-tracking_df['Savings'] = ''
-tracking_df['Declared Status'] = 'Declared'
-
-# =========================
-# CLEAN & EXPORT
-# =========================
-tracking_df = tracking_df.dropna(subset=['Movement Date'])
-
-output_file = f"{batch_number}.xlsx"
-tracking_df.to_excel(output_file, index=False)
-
-print(f"✅ Tracking sheet created: {output_file}")
-
-
-
-st.title("Tracking Sheet Generator")
-
-business_unit = st.selectbox("Select Business Unit", list(business_unit_map.keys()))
-pooler = "CHEP"
-batch_number = st.text_input("Enter Batch Number")
-
-main_file = st.file_uploader("Upload Main Excel File", type=["xlsx"])
-
-if main_file:
-    df = pd.read_excel(main_file)
-    df.columns = df.columns.astype(str).str.strip()
-
-    st.subheader("Map Input Columns")
-
-    columns = df.columns.tolist()
-
-    movement_date_col = st.selectbox("Select column for Movement Date", columns)
-    quantity_col = st.selectbox("Select column for Quantity", columns)
-    pallet_type_col = st.selectbox("Select column for Pallet Type", columns)
-    reference_col = st.selectbox("Select column for Reference", columns)
-    customer_col = st.selectbox("Select column for Customer", columns)
-
-    gid_available = st.radio(
-        "Is GID / Location ID already available in the main file?",
-        ["Yes", "No"]
+def clean_columns(df):
+    df.columns = (
+        df.columns.astype(str)
+        .str.strip()
+        .str.replace("\xa0", "", regex=False)
     )
+    return df
 
-    gid_col = None
-    lookup_file = None
 
-    if gid_available == "Yes":
-        gid_col = st.selectbox("Select column for GID / Location ID", columns)
-    else:
-        lookup_file = st.file_uploader(
-            "Upload Customer to GID Matching File",
-            type=["xlsx"]
-        )
-
-         
 def map_pallet_type(value):
     value = str(value).strip().upper()
 
@@ -200,39 +55,239 @@ def map_pallet_type(value):
     ):
         return "CHEP 08 - Half"
 
-    return value    
+    return value
 
-    if st.button("Generate Tracking File"):
+
+def convert_date_to_ddmmyyyy(value):
+    if pd.isna(value):
+        return pd.NaT
+
+    value_str = str(value).strip()
+
+    # Handles date like 20260330
+    if value_str.isdigit() and len(value_str) == 8:
+        return pd.to_datetime(value_str, format="%Y%m%d", errors="coerce")
+
+    # Handles Excel / normal dates
+    return pd.to_datetime(value, errors="coerce", dayfirst=True)
+
+
+def is_missing_gid(series):
+    return (
+        series.isna()
+        | (series.astype(str).str.strip() == "")
+        | (series.astype(str).str.lower().str.strip() == "nan")
+    )
+
+
+def excel_buffer(df):
+    buffer = BytesIO()
+    df.to_excel(buffer, index=False)
+    buffer.seek(0)
+    return buffer
+
+
+def build_tracking_file(final_df, business_unit, pooler, batch_number):
+    grouped = final_df.groupby(
+        ["Reference", "Pallet Type"],
+        as_index=False
+    ).agg({
+        "Quantity": "sum",
+        "Movement Date": "first",
+        "Customer": "first",
+        "GID": "first"
+    })
+
+    tracking_df = pd.DataFrame({
+        "Movement Date": grouped["Movement Date"],
+        "Business Unit": business_unit_map[business_unit]["Sender Name"],
+        "Pooler": pooler,
+        "Movement Direction": "Out",
+        "Pallet Type": grouped["Pallet Type"],
+        "Reference 1": grouped["Reference"],
+        "Reference 2": "",
+        "Reference 3": "",
+        "Batch Number": batch_number,
+        "Sender Location Id": business_unit_map[business_unit]["Sender Location Id"],
+        "Sender Name": business_unit_map[business_unit]["Sender Name"],
+        "Sender Town": "",
+        "Sender Postcode": "",
+        "Receiver Location Id": grouped["GID"],
+        "Receiver Name": grouped["Customer"],
+        "Receiver Town": "",
+        "Receiver Postcode": "",
+        "Movement Type": f"Out - {pooler} Drop Point",
+        "Quantity": grouped["Quantity"],
+        "Savings": "",
+        "Declared Status": "Declared"
+    })
+
+    return tracking_df
+
+
+# =========================
+# APP
+# =========================
+st.title("PP Tracking Sheet")
+
+business_unit = st.selectbox("Select Business Unit", list(business_unit_map.keys()))
+pooler = "CHEP"
+batch_number = st.text_input("Enter Batch Number")
+
+main_file = st.file_uploader("Upload Main Excel File", type=["xlsx"])
+
+if main_file:
+
+    df = pd.read_excel(main_file)
+    df = clean_columns(df)
+
+    st.subheader("Map Main File Columns")
+
+    columns = df.columns.tolist()
+
+    movement_date_col = st.selectbox("Select column for Movement Date", columns)
+    quantity_col = st.selectbox("Select column for Quantity", columns)
+    pallet_type_col = st.selectbox("Select column for Pallet Type", columns)
+    reference_col = st.selectbox("Select column for Reference", columns)
+    customer_col = st.selectbox("Select column for Customer", columns)
+
+    gid_available = st.radio(
+        "Is GID / Location ID already available in the main file?",
+        ["Yes", "No"]
+    )
+
+    gid_col = None
+    lookup_file = None
+
+    if gid_available == "Yes":
+        gid_col = st.selectbox("Select column for GID / Location ID", columns)
+    else:
+        if business_unit == "HQ":
+            lookup_file = st.file_uploader(
+                "Upload HQ Location Mapping Table",
+                type=["xlsx"]
+            )
+        else:
+            lookup_file = st.file_uploader(
+                "Upload Customer to GID Matching File",
+                type=["xlsx"]
+            )
+
+    if st.button("Prepare Data"):
+
+        if not batch_number:
+            st.error("Please enter Batch Number.")
+            st.stop()
 
         work_df = df.copy()
 
-        work_df["Movement Date"] = work_df[movement_date_col]
+        work_df["Movement Date Parsed"] = work_df[movement_date_col].apply(convert_date_to_ddmmyyyy)
+        work_df["Movement Date"] = work_df["Movement Date Parsed"].dt.strftime("%d/%m/%Y")
         work_df["Quantity"] = pd.to_numeric(work_df[quantity_col], errors="coerce").fillna(0)
         work_df["Pallet Type"] = work_df[pallet_type_col].apply(map_pallet_type)
         work_df["Reference"] = work_df[reference_col]
-        work_df["Customer"] = work_df[customer_col]
+        work_df["Customer"] = work_df[customer_col].astype(str).str.strip()
 
         if gid_available == "Yes":
+
             work_df["GID"] = work_df[gid_col]
+
         else:
+
             if lookup_file is None:
-                st.error("Please upload the Customer to GID matching file.")
+                st.error("Please upload the required GID matching file.")
                 st.stop()
 
             lookup_df = pd.read_excel(lookup_file)
-            lookup_df.columns = lookup_df.columns.astype(str).str.strip()
+            lookup_df = clean_columns(lookup_df)
 
-            st.subheader("Map Lookup File Columns")
+            st.session_state["lookup_df"] = lookup_df
+            st.session_state["work_df_without_gid"] = work_df
+            st.session_state["need_lookup_mapping"] = True
+            st.session_state["business_unit_for_lookup"] = business_unit
 
-            lookup_customer_col = st.selectbox(
-                "Select Customer column in lookup file",
-                lookup_df.columns.tolist()
+        if gid_available == "Yes":
+            st.session_state["work_df"] = work_df
+
+# =========================
+# LOOKUP MAPPING
+# =========================
+if st.session_state.get("need_lookup_mapping", False):
+
+    lookup_df = st.session_state["lookup_df"]
+    work_df = st.session_state["work_df_without_gid"]
+    lookup_business_unit = st.session_state["business_unit_for_lookup"]
+
+    if lookup_business_unit == "HQ":
+
+        st.subheader("HQ Location Mapping")
+
+        main_address_col = st.selectbox(
+            "Select Address Line 1 column from Main File",
+            work_df.columns.tolist(),
+            key="hq_main_address_col"
+        )
+
+        lookup_address_col = st.selectbox(
+            "Select Address1 column from HQ Location Mapping Table",
+            lookup_df.columns.tolist(),
+            key="hq_lookup_address_col"
+        )
+
+        lookup_gid_col = st.selectbox(
+            "Select CHEP GID column from HQ Location Mapping Table",
+            lookup_df.columns.tolist(),
+            key="hq_lookup_gid_col"
+        )
+
+        if st.button("Apply HQ Mapping"):
+
+            work_df["Address Match Key"] = (
+                work_df[main_address_col]
+                .astype(str)
+                .str.strip()
+                .str.upper()
             )
 
-            lookup_gid_col = st.selectbox(
-                "Select GID / Location ID column in lookup file",
-                lookup_df.columns.tolist()
+            lookup_df["Address Match Key"] = (
+                lookup_df[lookup_address_col]
+                .astype(str)
+                .str.strip()
+                .str.upper()
             )
+
+            lookup_df = lookup_df[["Address Match Key", lookup_gid_col]].drop_duplicates()
+
+            lookup_df.rename(columns={
+                lookup_gid_col: "GID"
+            }, inplace=True)
+
+            work_df = work_df.merge(
+                lookup_df,
+                on="Address Match Key",
+                how="left"
+            )
+
+            st.session_state["work_df"] = work_df
+            st.session_state["need_lookup_mapping"] = False
+
+    else:
+
+        st.subheader("Customer to GID Mapping")
+
+        lookup_customer_col = st.selectbox(
+            "Select Customer column in lookup file",
+            lookup_df.columns.tolist(),
+            key="lookup_customer_col"
+        )
+
+        lookup_gid_col = st.selectbox(
+            "Select GID / Location ID column in lookup file",
+            lookup_df.columns.tolist(),
+            key="lookup_gid_col"
+        )
+
+        if st.button("Apply Customer Lookup"):
 
             lookup_df = lookup_df[[lookup_customer_col, lookup_gid_col]].drop_duplicates()
 
@@ -241,55 +296,150 @@ def map_pallet_type(value):
                 lookup_gid_col: "GID"
             }, inplace=True)
 
+            lookup_df["Customer"] = lookup_df["Customer"].astype(str).str.strip()
+
             work_df = work_df.merge(
                 lookup_df,
                 on="Customer",
                 how="left"
             )
 
-        grouped = work_df.groupby(
-            ["Reference", "Pallet Type"],
-            as_index=False
-        ).agg({
-            "Quantity": "sum",
-            "Movement Date": "first",
-            "Customer": "first",
-            "GID": "first"
-        })
+            st.session_state["work_df"] = work_df
+            st.session_state["need_lookup_mapping"] = False
 
-        tracking_df = pd.DataFrame({
-            "Movement Date": grouped["Movement Date"],
-            "Business Unit": business_unit_map[business_unit]["Sender Name"],
-            "Pooler": pooler,
-            "Movement Direction": "Out",
-            "Pallet Type": grouped["Pallet Type"],
-            "Reference 1": grouped["Reference"],
-            "Reference 2": "",
-            "Reference 3": "",
-            "Batch Number": batch_number,
-            "Sender Location Id": business_unit_map[business_unit]["Sender Location Id"],
-            "Sender Name": business_unit_map[business_unit]["Sender Name"],
-            "Sender Town": "",
-            "Sender Postcode": "",
-            "Receiver Location Id": grouped["GID"],
-            "Receiver Name": grouped["Customer"],
-            "Receiver Town": "",
-            "Receiver Postcode": "",
-            "Movement Type": f"Out - {pooler} Drop Point",
-            "Quantity": grouped["Quantity"],
-            "Savings": "",
-            "Declared Status": "Declared"
-        })
+# =========================
+# DATE REVIEW AND GID REVIEW
+# =========================
+if "work_df" in st.session_state:
 
-        buffer = BytesIO()
-        tracking_df.to_excel(buffer, index=False)
-        buffer.seek(0)
+    work_df = st.session_state["work_df"].copy()
 
-        st.success("Tracking file generated successfully!")
+    today = pd.Timestamp.today().normalize()
+
+    work_df["Days Old"] = (
+        today - work_df["Movement Date Parsed"]
+    ).dt.days
+
+    old_date_df = work_df[work_df["Days Old"] > 89].copy()
+
+    if not old_date_df.empty:
+
+        st.warning("Some movement dates are more than 89 days old.")
+
+        st.subheader("Review Dates More Than 89 Days Old")
+
+        for idx, row in old_date_df.iterrows():
+
+            reference = row["Reference"]
+            old_date = row["Movement Date"]
+
+            st.write(
+                f"Reference Number **{reference}** has date **{old_date}**. "
+                "It is more than 89 days. Do you want to amend date for this reference number?"
+            )
+
+            amend_date = st.checkbox(
+                f"Amend date for reference {reference}?",
+                key=f"amend_date_{idx}"
+            )
+
+            if amend_date:
+                new_date = st.date_input(
+                    f"Enter new date for reference {reference}",
+                    key=f"new_date_{idx}"
+                )
+
+                work_df.loc[idx, "Movement Date Parsed"] = pd.to_datetime(new_date)
+                work_df.loc[idx, "Movement Date"] = pd.to_datetime(new_date).strftime("%d/%m/%Y")
+
+    missing_gid_df = work_df[is_missing_gid(work_df["GID"])].copy()
+
+    gid_inputs = {}
+    remove_customers = []
+
+    if not missing_gid_df.empty:
+
+        st.warning("Some customers are missing GID / Location ID.")
+
+        st.subheader("Missing GID Input")
+
+        missing_customers = missing_gid_df["Customer"].drop_duplicates().tolist()
+
+        for customer in missing_customers:
+
+            st.write(f"**GID missing against Customer:** {customer}")
+
+            col1, col2 = st.columns([2, 1])
+
+            with col1:
+                gid_inputs[customer] = st.text_input(
+                    f"Please input GID for {customer}",
+                    key=f"gid_input_{customer}"
+                )
+
+            with col2:
+                remove = st.checkbox(
+                    f"Remove rows for {customer}?",
+                    key=f"remove_{customer}"
+                )
+
+                if remove:
+                    remove_customers.append(customer)
+
+    else:
+        st.success("No missing GIDs found.")
+
+    # =========================
+    # FINAL OUTPUT
+    # =========================
+    if st.button("Generate Final Files"):
+
+        removed_rows_df = work_df[work_df["Customer"].isin(remove_customers)].copy()
+
+        for customer, gid_value in gid_inputs.items():
+            if gid_value.strip():
+                work_df.loc[
+                    work_df["Customer"] == customer,
+                    "GID"
+                ] = gid_value.strip()
+
+        gid_required_df = work_df[
+            is_missing_gid(work_df["GID"])
+            & ~work_df["Customer"].isin(remove_customers)
+        ].copy()
+
+        final_df = work_df[
+            ~is_missing_gid(work_df["GID"])
+            & ~work_df["Customer"].isin(remove_customers)
+        ].copy()
+
+        tracking_df = build_tracking_file(
+            final_df,
+            business_unit,
+            pooler,
+            batch_number
+        )
+
+        st.success("Files generated successfully.")
 
         st.download_button(
-            label="Download Tracking File",
-            data=buffer,
-            file_name=f"{batch_number}.xlsx",
+            label="Download Tracking Sheet",
+            data=excel_buffer(tracking_df),
+            file_name=f"{batch_number}_tracking_sheet.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
+        st.download_button(
+            label="Download GID Required File",
+            data=excel_buffer(gid_required_df),
+            file_name=f"{batch_number}_gid_required.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+        st.download_button(
+            label="Download Removed Rows File",
+            data=excel_buffer(removed_rows_df),
+            file_name=f"{batch_number}_removed_rows.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+  
