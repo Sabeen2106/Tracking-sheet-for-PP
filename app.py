@@ -36,9 +36,9 @@ def clean_columns(df):
 def map_pallet_type(value):
     value = str(value).strip().upper()
 
-    if "PALLET 1000X1200 MM" in value or "1-B1210A" in value or value == "01":
+    if "PALLET 1000X1200 MM" in value or "1-B1210A" in value or value == "01" or value == "CHEP UK":
         return "CHEP 01 - UK"
-    elif "3-B1208A" in value or value == "03":
+    elif "3-B1208A" in value or value == "03" or value == "CHEP EURO":
         return "CHEP 03 - Euro"
     elif "8-B0806A" in value or value == "08":
         return "CHEP 08 - Half"
