@@ -68,13 +68,43 @@ def clean_reference_number(value):
     return value
 
 
-def is_missing_gid(series):
-    return (
-        series.isna()
-        | (series.astype(str).str.strip() == "")
-        | (series.astype(str).str.lower().str.strip() == "nan")
-    )
+missing_gid_df = work_df[is_missing_gid(work_df["GID"])].copy()
 
+gid_inputs = {}
+remove_rows = []
+
+if not missing_gid_df.empty:
+    st.warning("Some rows are missing GID / Location ID.")
+    st.subheader("Missing GID Input by Customer and Reference")
+
+    for idx, row in missing_gid_df.iterrows():
+        customer = row["Customer"]
+        reference = row["Reference"]
+        quantity = row["Quantity"]
+        movement_date = row["Movement Date"]
+
+        with st.container():
+            st.markdown("---")
+            st.write(f"**Customer:** {customer}")
+            st.write(f"**Reference Number:** {reference}")
+            st.write(f"**Movement Date:** {movement_date}")
+            st.write(f"**Quantity:** {quantity}")
+
+            gid_inputs[idx] = st.text_input(
+                "Please enter GID for this row",
+                key=f"gid_input_{idx}"
+            )
+
+            remove = st.checkbox(
+                "GID not found - remove this row",
+                key=f"remove_row_{idx}"
+            )
+
+            if remove:
+                remove_rows.append(idx)
+
+else:
+    st.success("No missing GIDs found.")
 
 def excel_buffer(df):
     buffer = BytesIO()
@@ -353,56 +383,56 @@ if "work_df" in st.session_state:
     else:
         st.success("No missing GIDs found.")
 
-    if st.button("Generate Final Files"):
-        for idx, gid_value in gid_inputs.items():
-            if gid_value.strip():
-                work_df.loc[idx, "GID"] = gid_value.strip()
+   if st.button("Generate Final Files"):
+    for idx, gid_value in gid_inputs.items():
+        if gid_value.strip():
+            work_df.loc[idx, "GID"] = gid_value.strip()
 
-        removed_rows_df = work_df.loc[remove_rows].copy()
+    removed_rows_df = work_df.loc[remove_rows].copy()
 
-        gid_required_df = work_df[
-            is_missing_gid(work_df["GID"])
-            & ~work_df.index.isin(remove_rows)
-        ].copy()
+    gid_required_df = work_df[
+        is_missing_gid(work_df["GID"])
+        & ~work_df.index.isin(remove_rows)
+    ].copy()
 
-        final_df = work_df[
-            ~is_missing_gid(work_df["GID"])
-            & ~work_df.index.isin(remove_rows)
-        ].copy()
+    final_df = work_df[
+        ~is_missing_gid(work_df["GID"])
+        & ~work_df.index.isin(remove_rows)
+    ].copy()
 
-        tracking_df = build_tracking_file(
-            final_df,
-            business_unit,
-            pooler,
-            batch_number
-        )
+    tracking_df = build_tracking_file(
+        final_df,
+        business_unit,
+        pooler,
+        batch_number
+    )
 
-        removed_tracking_df = build_tracking_file(
-            removed_rows_df,
-            business_unit,
-            pooler,
-            batch_number
-        )
+    removed_tracking_df = build_tracking_file(
+        removed_rows_df,
+        business_unit,
+        pooler,
+        batch_number
+    )
 
-        st.success("Files generated successfully.")
+    st.download_button(
+        label="Download Tracking Sheet",
+        data=excel_buffer(tracking_df),
+        file_name=f"{batch_number}_tracking_sheet.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
-        st.download_button(
-            label="Download Tracking Sheet",
-            data=excel_buffer(tracking_df),
-            file_name=f"{batch_number}_tracking_sheet.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+    st.download_button(
+        label="Download GID Required File",
+        data=excel_buffer(gid_required_df),
+        file_name=f"{batch_number}_gid_required.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
-        st.download_button(
-            label="Download GID Required File",
-            data=excel_buffer(gid_required_df),
-            file_name=f"{batch_number}_gid_required.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
-        st.download_button(
-            label="Download Removed Rows",
-            data=excel_buffer(removed_tracking_df),
-            file_name="Removed rows.xlsx",
+    st.download_button(
+        label="Download Removed Rows",
+        data=excel_buffer(removed_tracking_df),
+        file_name="Removed rows.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
