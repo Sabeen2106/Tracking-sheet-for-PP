@@ -2,17 +2,142 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 
+# =========================
+# BUSINESS UNIT MAPPING
+# =========================
 business_unit_map = {
-    "AUSTRIA": {"Sender Name": "Austria", "Sender Location Id": "5000692765"},
-    "DENMARK": {"Sender Name": "Denmark", "Sender Location Id": "5000538928"},
-    "DRIFFIELD": {"Sender Name": "Driffield", "Sender Location Id": "5000503209"},
-    "FRANCE": {"Sender Name": "France", "Sender Location Id": "0101076563"},
-    "IRELAND": {"Sender Name": "Ireland", "Sender Location Id": "5000515873"},
-    "ITALY": {"Sender Name": "Italy", "Sender Location Id": "0101230808"},
-    "NETHERLANDS": {"Sender Name": "Netherlands", "Sender Location Id": "0100646888"},
-    "SPAIN": {"Sender Name": "Spain", "Sender Location Id": "5000449357"},
-    "HQ": {"Sender Name": "HQ", "Sender Location Id": "1000358868"}
+    "Austria": {"Sender Name": "Austria", "Sender Location Id": "5000692765"},
+    "Denmark": {"Sender Name": "Denmark", "Sender Location Id": "5000538928"},
+    "Driffield": {"Sender Name": "Driffield", "Sender Location Id": "5000503209"},
+    "France": {"Sender Name": "France", "Sender Location Id": "0101076563"},
+    "Ireland": {"Sender Name": "Ireland", "Sender Location Id": "5000515873"},
+    "Italy": {"Sender Name": "Italy", "Sender Location Id": "0101230808"},
+    "Netherlands": {"Sender Name": "Netherlands", "Sender Location Id": "0100646888"},
+    "Spain": {"Sender Name": "Spain", "Sender Location Id": "5000449357"},
+    "HQ": {"Sender Name": "HQ", "Sender Location Id": "1000358868"},
+    "Coca-Cola HBC Northern Ireland Ltd": {"Sender Name": "Coca-Cola HBC Northern Ireland Ltd", "Sender Location Id": "5000513592"}
 }
+
+# =========================
+# USER INPUTS
+# =========================
+business_unit = input("Enter Business Unit: ")
+
+if business_unit not in business_unit_map:
+    raise ValueError(" Invalid Business Unit")
+
+batch_number = input("Enter Batch Number: ")
+
+# =========================
+# LOAD MAIN FILE
+# =========================
+df = pd.read_excel("/content/060526 CCH CHEP.xlsx")
+
+# Clean columns
+df.columns = df.columns.str.strip().str.replace('\xa0', '', regex=True)
+
+# Rename required fields
+df.rename(columns={
+    'Customer': 'Customer',
+    'Delivery': 'Reference',
+    'Billing doc. date': 'Date'
+}, inplace=True)
+
+# Ensure clean key
+df['Customer'] = df['Customer'].astype(str).str.strip()
+
+# =========================
+# LOAD LOOKUP FILE (XLOOKUP SOURCE)
+# =========================
+lookup_df = pd.read_excel("/content/CCH IPP and CHEP.xlsx")
+
+lookup_df.columns = lookup_df.columns.str.strip().str.replace('\xa0', '', regex=True)
+
+lookup_df.rename(columns={
+    'Customer': 'Customer',
+    'Location ID': 'Location Id'
+}, inplace=True)
+
+lookup_df['Customer'] = lookup_df['Customer'].astype(str).str.strip()
+
+# =========================
+# XLOOKUP (CORRECT LEFT JOIN)
+# =========================
+df = df.merge(
+    lookup_df[['Customer', 'Location Id']],
+    on='Customer',
+    how='left'
+)
+
+# =========================
+# VALIDATION CHECK (IMPORTANT)
+# =========================
+if 'Location Id' not in df.columns:
+    raise ValueError(" Location Id not created from lookup")
+
+# =========================
+# FIX PALLET TYPE
+# =========================
+df['Pallet Type'] = 'CHEP 01 - UK'
+
+
+'''# =========================
+# FIX EXCEL SERIAL DATE
+# =========================
+
+df['Date'] = pd.to_datetime(
+    df['Date'],
+    unit='D',
+    origin='1899-12-30',
+    errors='coerce'
+)
+
+df['Date'] = df['Date'].dt.strftime('%d/%m/%Y')'''
+
+# =========================
+# BUILD TRACKING FILE
+# =========================
+tracking_df = pd.DataFrame()
+
+tracking_df['Movement Date'] = df['Date']
+tracking_df['Business Unit'] = business_unit
+tracking_df['Pooler'] = 'CHEP'
+tracking_df['Movement Direction'] = 'Out'
+tracking_df['Pallet Type'] = df['Pallet Type']
+tracking_df['Reference 1'] = df['Reference']
+tracking_df['Reference 2'] = ''
+tracking_df['Reference 3'] = ''
+tracking_df['Batch Number'] = batch_number
+
+# Sender
+tracking_df['Sender Location Id'] = business_unit_map[business_unit]['Sender Location Id']
+tracking_df['Sender Name'] = business_unit_map[business_unit]['Sender Name']
+tracking_df['Sender Town'] = ''
+tracking_df['Sender Postcode'] = ''
+
+# Receiver (FROM LOOKUP)
+tracking_df['Receiver Location Id'] = df['Location Id']
+tracking_df['Receiver Name'] = df['Customer']
+tracking_df['Receiver Town'] = ''
+tracking_df['Receiver Postcode'] = ''
+
+# Movement
+tracking_df['Movement Type'] = 'Out - CHEP Drop Point'
+tracking_df['Quantity'] = df['Quantity']
+tracking_df['Savings'] = ''
+tracking_df['Declared Status'] = 'Declared'
+
+# =========================
+# CLEAN & EXPORT
+# =========================
+tracking_df = tracking_df.dropna(subset=['Movement Date'])
+
+output_file = f"{batch_number}.xlsx"
+tracking_df.to_excel(output_file, index=False)
+
+print(f"✅ Tracking sheet created: {output_file}")
+
+
 
 st.title("Tracking Sheet Generator")
 
