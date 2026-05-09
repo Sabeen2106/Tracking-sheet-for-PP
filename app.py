@@ -2,6 +2,9 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 
+# =========================
+# BUSINESS UNIT MAPPING
+# =========================
 business_unit_map = {
     "Austria": {"Sender Name": "Austria", "Sender Location Id": "5000692765"},
     "Denmark": {"Sender Name": "Denmark", "Sender Location Id": "5000538928"},
@@ -18,7 +21,9 @@ business_unit_map = {
     }
 }
 
-
+# =========================
+# FUNCTIONS
+# =========================
 def clean_columns(df):
     df.columns = (
         df.columns.astype(str)
@@ -68,43 +73,13 @@ def clean_reference_number(value):
     return value
 
 
-missing_gid_df = work_df[is_missing_gid(work_df["GID"])].copy()
+def is_missing_gid(series):
+    return (
+        series.isna()
+        | (series.astype(str).str.strip() == "")
+        | (series.astype(str).str.lower().str.strip() == "nan")
+    )
 
-gid_inputs = {}
-remove_rows = []
-
-if not missing_gid_df.empty:
-    st.warning("Some rows are missing GID / Location ID.")
-    st.subheader("Missing GID Input by Customer and Reference")
-
-    for idx, row in missing_gid_df.iterrows():
-        customer = row["Customer"]
-        reference = row["Reference"]
-        quantity = row["Quantity"]
-        movement_date = row["Movement Date"]
-
-        with st.container():
-            st.markdown("---")
-            st.write(f"**Customer:** {customer}")
-            st.write(f"**Reference Number:** {reference}")
-            st.write(f"**Movement Date:** {movement_date}")
-            st.write(f"**Quantity:** {quantity}")
-
-            gid_inputs[idx] = st.text_input(
-                "Please enter GID for this row",
-                key=f"gid_input_{idx}"
-            )
-
-            remove = st.checkbox(
-                "GID not found - remove this row",
-                key=f"remove_row_{idx}"
-            )
-
-            if remove:
-                remove_rows.append(idx)
-
-else:
-    st.success("No missing GIDs found.")
 
 def excel_buffer(df):
     buffer = BytesIO()
@@ -114,15 +89,17 @@ def excel_buffer(df):
 
 
 def build_tracking_file(final_df, business_unit, pooler, batch_number):
+    columns = [
+        "Movement Date", "Business Unit", "Pooler", "Movement Direction",
+        "Pallet Type", "Reference 1", "Reference 2", "Reference 3",
+        "Batch Number", "Sender Location Id", "Sender Name", "Sender Town",
+        "Sender Postcode", "Receiver Location Id", "Receiver Name",
+        "Receiver Town", "Receiver Postcode", "Movement Type", "Quantity",
+        "Savings", "Declared Status"
+    ]
+
     if final_df.empty:
-        return pd.DataFrame(columns=[
-            "Movement Date", "Business Unit", "Pooler", "Movement Direction",
-            "Pallet Type", "Reference 1", "Reference 2", "Reference 3",
-            "Batch Number", "Sender Location Id", "Sender Name", "Sender Town",
-            "Sender Postcode", "Receiver Location Id", "Receiver Name",
-            "Receiver Town", "Receiver Postcode", "Movement Type", "Quantity",
-            "Savings", "Declared Status"
-        ])
+        return pd.DataFrame(columns=columns)
 
     grouped = final_df.groupby(
         ["Reference", "Pallet Type"],
@@ -134,7 +111,7 @@ def build_tracking_file(final_df, business_unit, pooler, batch_number):
         "GID": "first"
     })
 
-    return pd.DataFrame({
+    tracking_df = pd.DataFrame({
         "Movement Date": grouped["Movement Date"],
         "Business Unit": business_unit_map[business_unit]["Sender Name"],
         "Pooler": pooler,
@@ -158,7 +135,12 @@ def build_tracking_file(final_df, business_unit, pooler, batch_number):
         "Declared Status": "Declared"
     })
 
+    return tracking_df[columns]
 
+
+# =========================
+# APP
+# =========================
 st.title("PP Tracking Sheet")
 
 business_unit = st.selectbox("Select Business Unit", list(business_unit_map.keys()))
@@ -191,10 +173,17 @@ if main_file:
         lookup_file = None
     else:
         gid_col = None
+
         if business_unit == "HQ":
-            lookup_file = st.file_uploader("Upload HQ Location Mapping Table", type=["xlsx"])
+            lookup_file = st.file_uploader(
+                "Upload HQ Location Mapping Table",
+                type=["xlsx"]
+            )
         else:
-            lookup_file = st.file_uploader("Upload Customer to GID Matching File", type=["xlsx"])
+            lookup_file = st.file_uploader(
+                "Upload Customer to GID Matching File",
+                type=["xlsx"]
+            )
 
     if st.button("Prepare Data"):
         if not batch_number:
@@ -228,6 +217,9 @@ if main_file:
             st.session_state["business_unit_for_lookup"] = business_unit
 
 
+# =========================
+# GID LOOKUP MAPPING
+# =========================
 if st.session_state.get("need_lookup_mapping", False):
     lookup_df = st.session_state["lookup_df"]
     work_df = st.session_state["work_df_without_gid"]
@@ -255,22 +247,46 @@ if st.session_state.get("need_lookup_mapping", False):
         )
 
         if st.button("Apply HQ Mapping"):
+            before_rows = len(work_df)
+
             work_df["Address Match Key"] = (
-                work_df[main_address_col].astype(str).str.strip().str.upper()
+                work_df[main_address_col]
+                .astype(str)
+                .str.strip()
+                .str.upper()
             )
 
             lookup_df["Address Match Key"] = (
-                lookup_df[lookup_address_col].astype(str).str.strip().str.upper()
+                lookup_df[lookup_address_col]
+                .astype(str)
+                .str.strip()
+                .str.upper()
             )
 
-            lookup_df = lookup_df[["Address Match Key", lookup_gid_col]].drop_duplicates()
+            lookup_df = lookup_df[["Address Match Key", lookup_gid_col]].copy()
             lookup_df.rename(columns={lookup_gid_col: "GID"}, inplace=True)
+
+            lookup_df = lookup_df.dropna(subset=["Address Match Key"])
+            lookup_df = lookup_df.drop_duplicates(
+                subset=["Address Match Key"],
+                keep="first"
+            )
 
             work_df = work_df.merge(
                 lookup_df,
                 on="Address Match Key",
                 how="left"
             )
+
+            after_rows = len(work_df)
+
+            st.info(f"Rows before lookup: {before_rows}")
+            st.info(f"Rows after lookup: {after_rows}")
+
+            if after_rows > before_rows:
+                st.error("Warning: lookup has duplicated rows. Please check mapping file.")
+            else:
+                st.success("HQ mapping applied successfully.")
 
             st.session_state["work_df"] = work_df
             st.session_state["need_lookup_mapping"] = False
@@ -291,7 +307,9 @@ if st.session_state.get("need_lookup_mapping", False):
         )
 
         if st.button("Apply Customer Lookup"):
-            lookup_df = lookup_df[[lookup_customer_col, lookup_gid_col]].drop_duplicates()
+            before_rows = len(work_df)
+
+            lookup_df = lookup_df[[lookup_customer_col, lookup_gid_col]].copy()
 
             lookup_df.rename(columns={
                 lookup_customer_col: "Customer",
@@ -300,21 +318,39 @@ if st.session_state.get("need_lookup_mapping", False):
 
             lookup_df["Customer"] = lookup_df["Customer"].astype(str).str.strip()
 
+            lookup_df = lookup_df.dropna(subset=["Customer"])
+            lookup_df = lookup_df.drop_duplicates(
+                subset=["Customer"],
+                keep="first"
+            )
+
             work_df = work_df.merge(
                 lookup_df,
                 on="Customer",
                 how="left"
             )
 
+            after_rows = len(work_df)
+
+            st.info(f"Rows before lookup: {before_rows}")
+            st.info(f"Rows after lookup: {after_rows}")
+
+            if after_rows > before_rows:
+                st.error("Warning: lookup has duplicated rows. Please check mapping file.")
+            else:
+                st.success("Customer lookup applied successfully.")
+
             st.session_state["work_df"] = work_df
             st.session_state["need_lookup_mapping"] = False
 
 
+# =========================
+# DATE REVIEW, MISSING GID REVIEW, OUTPUT
+# =========================
 if "work_df" in st.session_state:
     work_df = st.session_state["work_df"].copy()
 
     today = pd.Timestamp.today().normalize()
-
     work_df["Days Old"] = (today - work_df["Movement Date Parsed"]).dt.days
 
     old_date_df = work_df[work_df["Days Old"] > 89].copy()
@@ -353,28 +389,28 @@ if "work_df" in st.session_state:
 
     if not missing_gid_df.empty:
         st.warning("Some rows are missing GID / Location ID.")
-        st.subheader("Missing GID Input by Reference Number")
+        st.subheader("Missing GID Input by Customer and Reference")
 
         for idx, row in missing_gid_df.iterrows():
             customer = row["Customer"]
             reference = row["Reference"]
+            quantity = row["Quantity"]
+            movement_date = row["Movement Date"]
 
-            st.write(
-                f"**GID missing against Customer:** {customer} "
-                f"| **Reference Number:** {reference}"
-            )
+            with st.container():
+                st.markdown("---")
+                st.write(f"**Customer:** {customer}")
+                st.write(f"**Reference Number:** {reference}")
+                st.write(f"**Movement Date:** {movement_date}")
+                st.write(f"**Quantity:** {quantity}")
 
-            col1, col2 = st.columns([2, 1])
-
-            with col1:
                 gid_inputs[idx] = st.text_input(
-                    f"Please share GID for customer {customer} against reference {reference}",
+                    "Please enter GID for this row",
                     key=f"gid_input_{idx}"
                 )
 
-            with col2:
                 remove = st.checkbox(
-                    f"GID not found - remove reference {reference}",
+                    "GID not found - remove this row",
                     key=f"remove_row_{idx}"
                 )
 
@@ -383,56 +419,63 @@ if "work_df" in st.session_state:
     else:
         st.success("No missing GIDs found.")
 
-   if st.button("Generate Final Files"):
-    for idx, gid_value in gid_inputs.items():
-        if gid_value.strip():
-            work_df.loc[idx, "GID"] = gid_value.strip()
+    if st.button("Generate Final Files"):
+        for idx, gid_value in gid_inputs.items():
+            if gid_value.strip():
+                work_df.loc[idx, "GID"] = gid_value.strip()
 
-    removed_rows_df = work_df.loc[remove_rows].copy()
+        removed_rows_df = work_df.loc[remove_rows].copy()
 
-    gid_required_df = work_df[
-        is_missing_gid(work_df["GID"])
-        & ~work_df.index.isin(remove_rows)
-    ].copy()
+        gid_required_df = work_df[
+            is_missing_gid(work_df["GID"])
+            & ~work_df.index.isin(remove_rows)
+        ].copy()
 
-    final_df = work_df[
-        ~is_missing_gid(work_df["GID"])
-        & ~work_df.index.isin(remove_rows)
-    ].copy()
+        final_df = work_df[
+            ~is_missing_gid(work_df["GID"])
+            & ~work_df.index.isin(remove_rows)
+        ].copy()
 
-    tracking_df = build_tracking_file(
-        final_df,
-        business_unit,
-        pooler,
-        batch_number
-    )
+        tracking_df = build_tracking_file(
+            final_df,
+            business_unit,
+            pooler,
+            batch_number
+        )
 
-    removed_tracking_df = build_tracking_file(
-        removed_rows_df,
-        business_unit,
-        pooler,
-        batch_number
-    )
+        gid_required_tracking_df = build_tracking_file(
+            gid_required_df,
+            business_unit,
+            pooler,
+            batch_number
+        )
 
-    st.download_button(
-        label="Download Tracking Sheet",
-        data=excel_buffer(tracking_df),
-        file_name=f"{batch_number}_tracking_sheet.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+        removed_tracking_df = build_tracking_file(
+            removed_rows_df,
+            business_unit,
+            pooler,
+            batch_number
+        )
 
-    st.download_button(
-        label="Download GID Required File",
-        data=excel_buffer(gid_required_df),
-        file_name=f"{batch_number}_gid_required.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+        st.success("Files generated successfully.")
 
-    st.download_button(
-        label="Download Removed Rows",
-        data=excel_buffer(removed_tracking_df),
-        file_name="Removed rows.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+        st.download_button(
+            label="Download Tracking Sheet",
+            data=excel_buffer(tracking_df),
+            file_name=f"{batch_number}_tracking_sheet.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+        st.download_button(
+            label="Download GID Required File",
+            data=excel_buffer(gid_required_tracking_df),
+            file_name=f"{batch_number}_gid_required.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+        st.download_button(
+            label="Download Removed Rows",
+            data=excel_buffer(removed_tracking_df),
+            file_name="Removed rows.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
