@@ -70,7 +70,20 @@ def convert_date_to_ddmmyyyy(value):
 
     # Handles Excel / normal dates
     return pd.to_datetime(value, errors="coerce", dayfirst=True)
+    
+def clean_reference_number(value):
 
+    value = str(value).strip()
+
+    # Remove decimal from Excel numbers
+    if value.endswith(".0"):
+        value = value[:-2]
+
+    # Keep only last 13 characters if longer than 13
+    if len(value) > 13:
+        value = value[-13:]
+
+    return value
 
 def is_missing_gid(series):
     return (
