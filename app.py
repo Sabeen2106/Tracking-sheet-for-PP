@@ -155,7 +155,59 @@ def excel_buffer(df):
     df.to_excel(buffer, index=False)
     buffer.seek(0)
     return buffer
+def convert_date_to_ddmmyyyy(value):
 
+    if pd.isna(value):
+        return pd.NaT
+
+    # Excel serial number like 46139
+    if isinstance(value, (int, float)):
+
+        # Ignore impossible small numbers
+        if value > 1000:
+
+            return pd.to_datetime(
+                value,
+                unit="D",
+                origin="1899-12-30",
+                errors="coerce"
+            )
+
+    value_str = str(value).strip()
+
+    # Remove .0
+    if value_str.endswith(".0"):
+        value_str = value_str[:-2]
+
+    # Format like 20260330
+    if value_str.isdigit() and len(value_str) == 8:
+
+        return pd.to_datetime(
+            value_str,
+            format="%Y%m%d",
+            errors="coerce"
+        )
+
+    # Excel serial number stored as string
+    if value_str.isdigit():
+
+        number = int(value_str)
+
+        if number > 1000:
+
+            return pd.to_datetime(
+                number,
+                unit="D",
+                origin="1899-12-30",
+                errors="coerce"
+            )
+
+    # Normal dates
+    return pd.to_datetime(
+        value,
+        errors="coerce",
+        dayfirst=True
+    )
 
 def build_tracking_file(
     final_df,
