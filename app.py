@@ -70,12 +70,26 @@ def split_spain_customer_gid(value):
     if value.endswith(".0"):
         value = value[:-2]
 
-    if value.isdigit():
-        return pd.Series({"Customer": "", "GID": value})
+    # Remove starting dash first
+    value = value.lstrip("-").strip()
 
-    customer_name = value.lstrip("-").strip()
+    parts = value.split(maxsplit=1)
 
-    return pd.Series({"Customer": customer_name, "GID": ""})
+    # If first part is numeric, use it as GID
+    if len(parts) >= 2 and parts[0].isdigit():
+        gid = parts[0]
+        customer = parts[1].lstrip("-").strip()
+
+        return pd.Series({
+            "Customer": customer,
+            "GID": gid
+        })
+
+    # If no numeric GID found, keep full value as customer and leave GID blank
+    return pd.Series({
+        "Customer": value,
+        "GID": ""
+    })
 
 
 def is_missing_gid(series):
