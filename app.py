@@ -2,9 +2,6 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 
-# =========================
-# BUSINESS UNIT MAPPING
-# =========================
 business_unit_map = {
     "Austria": {"Sender Name": "Austria", "Sender Location Id": "5000692765"},
     "Denmark": {"Sender Name": "Denmark", "Sender Location Id": "5000538928"},
@@ -21,24 +18,18 @@ business_unit_map = {
     }
 }
 
-# =========================
-# FUNCTIONS
-# =========================
+
 def clean_columns(df):
-    df.columns = (
-        df.columns.astype(str)
-        .str.strip()
-        .str.replace("\xa0", "", regex=False)
-    )
+    df.columns = df.columns.astype(str).str.strip().str.replace("\xa0", "", regex=False)
     return df
 
 
 def map_pallet_type(value):
     value = str(value).strip().upper()
 
-    if "PALLET 1000X1200 MM" in value or "1-B1210A" in value or value == "01" or value == "CHEP UK":
+    if "PALLET 1000X1200 MM" in value or "1-B1210A" in value or value == "01":
         return "CHEP 01 - UK"
-    elif "3-B1208A" in value or value == "03" or value == "CHEP EURO" or value == "EUR":
+    elif "3-B1208A" in value or value == "03":
         return "CHEP 03 - Euro"
     elif "8-B0806A" in value or value == "08":
         return "CHEP 08 - Half"
@@ -71,6 +62,20 @@ def clean_reference_number(value):
         value = value[-13:]
 
     return value
+
+
+def split_spain_customer_gid(value):
+    value = str(value).strip()
+
+    if value.endswith(".0"):
+        value = value[:-2]
+
+    if value.isdigit():
+        return pd.Series({"Customer": "", "GID": value})
+
+    customer_name = value.lstrip("-").strip()
+
+    return pd.Series({"Customer": customer_name, "GID": ""})
 
 
 def is_missing_gid(series):
@@ -138,9 +143,6 @@ def build_tracking_file(final_df, business_unit, pooler, batch_number):
     return tracking_df[columns]
 
 
-# =========================
-# APP
-# =========================
 st.title("PP Tracking Sheet")
 
 business_unit = st.selectbox("Select Business Unit", list(business_unit_map.keys()))
@@ -163,27 +165,27 @@ if main_file:
     reference_col = st.selectbox("Select column for Reference", columns)
     customer_col = st.selectbox("Select column for Customer", columns)
 
-    gid_available = st.radio(
-        "Is GID / Location ID already available in the main file?",
-        ["Yes", "No"]
-    )
-
-    if gid_available == "Yes":
-        gid_col = st.selectbox("Select column for GID / Location ID", columns)
+    if business_unit == "Spain":
+        st.info("Spain selected: numeric values in the Customer column will be treated as GID. Text values will remain as Customer names.")
+        gid_available = "Spain Logic"
+        gid_col = None
         lookup_file = None
     else:
-        gid_col = None
+        gid_available = st.radio(
+            "Is GID / Location ID already available in the main file?",
+            ["Yes", "No"]
+        )
 
-        if business_unit == "HQ":
-            lookup_file = st.file_uploader(
-                "Upload HQ Location Mapping Table",
-                type=["xlsx"]
-            )
+        if gid_available == "Yes":
+            gid_col = st.selectbox("Select column for GID / Location ID", columns)
+            lookup_file = None
         else:
-            lookup_file = st.file_uploader(
-                "Upload Customer to GID Matching File",
-                type=["xlsx"]
-            )
+            gid_col = None
+
+            if business_unit == "HQ":
+                lookup_file = st.file_uploader("Upload HQ Location Mapping Table", type=["xlsx"])
+            else:
+                lookup_file = st.file_uploader("Upload Customer to GID Matching File", type=["xlsx"])
 
     if st.button("Prepare Data"):
         if not batch_number:
@@ -197,29 +199,37 @@ if main_file:
         work_df["Quantity"] = pd.to_numeric(work_df[quantity_col], errors="coerce").fillna(0)
         work_df["Pallet Type"] = work_df[pallet_type_col].apply(map_pallet_type)
         work_df["Reference"] = work_df[reference_col].apply(clean_reference_number)
-        work_df["Customer"] = work_df[customer_col].astype(str).str.strip()
 
-        if gid_available == "Yes":
-            work_df["GID"] = work_df[gid_col]
+        if business_unit == "Spain":
+            spain_split = work_df[customer_col].apply(split_spain_customer_gid)
+            work_df["Customer"] = spain_split["Customer"]
+            work_df["GID"] = spain_split["GID"]
+
             st.session_state["work_df"] = work_df
             st.session_state["need_lookup_mapping"] = False
+
         else:
-            if lookup_file is None:
-                st.error("Please upload the required GID matching file.")
-                st.stop()
+            work_df["Customer"] = work_df[customer_col].astype(str).str.strip()
 
-            lookup_df = pd.read_excel(lookup_file)
-            lookup_df = clean_columns(lookup_df)
+            if gid_available == "Yes":
+                work_df["GID"] = work_df[gid_col]
+                st.session_state["work_df"] = work_df
+                st.session_state["need_lookup_mapping"] = False
 
-            st.session_state["lookup_df"] = lookup_df
-            st.session_state["work_df_without_gid"] = work_df
-            st.session_state["need_lookup_mapping"] = True
-            st.session_state["business_unit_for_lookup"] = business_unit
+            else:
+                if lookup_file is None:
+                    st.error("Please upload the required GID matching file.")
+                    st.stop()
+
+                lookup_df = pd.read_excel(lookup_file)
+                lookup_df = clean_columns(lookup_df)
+
+                st.session_state["lookup_df"] = lookup_df
+                st.session_state["work_df_without_gid"] = work_df
+                st.session_state["need_lookup_mapping"] = True
+                st.session_state["business_unit_for_lookup"] = business_unit
 
 
-# =========================
-# GID LOOKUP MAPPING
-# =========================
 if st.session_state.get("need_lookup_mapping", False):
     lookup_df = st.session_state["lookup_df"]
     work_df = st.session_state["work_df_without_gid"]
@@ -249,44 +259,18 @@ if st.session_state.get("need_lookup_mapping", False):
         if st.button("Apply HQ Mapping"):
             before_rows = len(work_df)
 
-            work_df["Address Match Key"] = (
-                work_df[main_address_col]
-                .astype(str)
-                .str.strip()
-                .str.upper()
-            )
-
-            lookup_df["Address Match Key"] = (
-                lookup_df[lookup_address_col]
-                .astype(str)
-                .str.strip()
-                .str.upper()
-            )
+            work_df["Address Match Key"] = work_df[main_address_col].astype(str).str.strip().str.upper()
+            lookup_df["Address Match Key"] = lookup_df[lookup_address_col].astype(str).str.strip().str.upper()
 
             lookup_df = lookup_df[["Address Match Key", lookup_gid_col]].copy()
             lookup_df.rename(columns={lookup_gid_col: "GID"}, inplace=True)
-
             lookup_df = lookup_df.dropna(subset=["Address Match Key"])
-            lookup_df = lookup_df.drop_duplicates(
-                subset=["Address Match Key"],
-                keep="first"
-            )
+            lookup_df = lookup_df.drop_duplicates(subset=["Address Match Key"], keep="first")
 
-            work_df = work_df.merge(
-                lookup_df,
-                on="Address Match Key",
-                how="left"
-            )
-
-            after_rows = len(work_df)
+            work_df = work_df.merge(lookup_df, on="Address Match Key", how="left")
 
             st.info(f"Rows before lookup: {before_rows}")
-            st.info(f"Rows after lookup: {after_rows}")
-
-            if after_rows > before_rows:
-                st.error("Warning: lookup has duplicated rows. Please check mapping file.")
-            else:
-                st.success("HQ mapping applied successfully.")
+            st.info(f"Rows after lookup: {len(work_df)}")
 
             st.session_state["work_df"] = work_df
             st.session_state["need_lookup_mapping"] = False
@@ -317,36 +301,18 @@ if st.session_state.get("need_lookup_mapping", False):
             }, inplace=True)
 
             lookup_df["Customer"] = lookup_df["Customer"].astype(str).str.strip()
-
             lookup_df = lookup_df.dropna(subset=["Customer"])
-            lookup_df = lookup_df.drop_duplicates(
-                subset=["Customer"],
-                keep="first"
-            )
+            lookup_df = lookup_df.drop_duplicates(subset=["Customer"], keep="first")
 
-            work_df = work_df.merge(
-                lookup_df,
-                on="Customer",
-                how="left"
-            )
-
-            after_rows = len(work_df)
+            work_df = work_df.merge(lookup_df, on="Customer", how="left")
 
             st.info(f"Rows before lookup: {before_rows}")
-            st.info(f"Rows after lookup: {after_rows}")
-
-            if after_rows > before_rows:
-                st.error("Warning: lookup has duplicated rows. Please check mapping file.")
-            else:
-                st.success("Customer lookup applied successfully.")
+            st.info(f"Rows after lookup: {len(work_df)}")
 
             st.session_state["work_df"] = work_df
             st.session_state["need_lookup_mapping"] = False
 
 
-# =========================
-# DATE REVIEW, MISSING GID REVIEW, OUTPUT
-# =========================
 if "work_df" in st.session_state:
     work_df = st.session_state["work_df"].copy()
 
@@ -436,26 +402,9 @@ if "work_df" in st.session_state:
             & ~work_df.index.isin(remove_rows)
         ].copy()
 
-        tracking_df = build_tracking_file(
-            final_df,
-            business_unit,
-            pooler,
-            batch_number
-        )
-
-        gid_required_tracking_df = build_tracking_file(
-            gid_required_df,
-            business_unit,
-            pooler,
-            batch_number
-        )
-
-        removed_tracking_df = build_tracking_file(
-            removed_rows_df,
-            business_unit,
-            pooler,
-            batch_number
-        )
+        tracking_df = build_tracking_file(final_df, business_unit, pooler, batch_number)
+        gid_required_tracking_df = build_tracking_file(gid_required_df, business_unit, pooler, batch_number)
+        removed_tracking_df = build_tracking_file(removed_rows_df, business_unit, pooler, batch_number)
 
         st.success("Files generated successfully.")
 
