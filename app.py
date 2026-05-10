@@ -67,7 +67,6 @@ def convert_date_to_ddmmyyyy(value):
     if pd.isna(value):
         return pd.NaT
 
-    # Excel serial number like 46139
     if isinstance(value, (int, float)):
         if value > 1000:
             return pd.to_datetime(
@@ -82,46 +81,38 @@ def convert_date_to_ddmmyyyy(value):
     if value_str.endswith(".0"):
         value_str = value_str[:-2]
 
-    # Handles 2026-05-01 exactly as YYYY-MM-DD
-    if "-" in value_str and len(value_str) >= 10:
-        return pd.to_datetime(
-            value_str[:10],
-            format="%Y-%m-%d",
-            errors="coerce"
-        )
+    # 2026-05-01 or 2026/05/01
+    if len(value_str) >= 10:
+        date_part = value_str[:10]
 
-    # Handles 2026/05/01 exactly as YYYY/MM/DD
-    if "/" in value_str and len(value_str) >= 10:
-        parts = value_str[:10].split("/")
+        if "-" in date_part:
+            parts = date_part.split("-")
 
-        if len(parts) == 3 and len(parts[0]) == 4:
-            return pd.to_datetime(
-                value_str[:10],
-                format="%Y/%m/%d",
-                errors="coerce"
-            )
+            if len(parts) == 3 and len(parts[0]) == 4:
+                return pd.Timestamp(
+                    year=int(parts[0]),
+                    month=int(parts[1]),
+                    day=int(parts[2])
+                )
 
-    # Handles 20260330
+        if "/" in date_part:
+            parts = date_part.split("/")
+
+            if len(parts) == 3 and len(parts[0]) == 4:
+                return pd.Timestamp(
+                    year=int(parts[0]),
+                    month=int(parts[1]),
+                    day=int(parts[2])
+                )
+
+    # 20260501
     if value_str.isdigit() and len(value_str) == 8:
-        return pd.to_datetime(
-            value_str,
-            format="%Y%m%d",
-            errors="coerce"
+        return pd.Timestamp(
+            year=int(value_str[0:4]),
+            month=int(value_str[4:6]),
+            day=int(value_str[6:8])
         )
 
-    # Excel serial number stored as text
-    if value_str.isdigit():
-        number = int(value_str)
-
-        if number > 1000:
-            return pd.to_datetime(
-                number,
-                unit="D",
-                origin="1899-12-30",
-                errors="coerce"
-            )
-
-    # Handles normal UK date like 01/05/2026
     return pd.to_datetime(
         value_str,
         errors="coerce",
