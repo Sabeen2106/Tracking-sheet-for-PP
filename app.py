@@ -50,6 +50,7 @@ def map_pallet_type(value):
         or value == "03"
         or value == "EUR"
         or value == "EURO"
+        or value == "CHEP 80"
     ):
         return "CHEP 03 - Euro"
 
