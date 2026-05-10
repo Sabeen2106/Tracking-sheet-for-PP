@@ -69,9 +69,7 @@ def convert_date_to_ddmmyyyy(value):
 
     # Excel serial number like 46139
     if isinstance(value, (int, float)):
-
         if value > 1000:
-
             return pd.to_datetime(
                 value,
                 unit="D",
@@ -81,29 +79,41 @@ def convert_date_to_ddmmyyyy(value):
 
     value_str = str(value).strip()
 
-    # Remove .0
     if value_str.endswith(".0"):
         value_str = value_str[:-2]
 
-    # Replace - with /
-    value_str = value_str.replace("-", "/")
+    # Handles 2026-05-01 exactly as YYYY-MM-DD
+    if "-" in value_str and len(value_str) >= 10:
+        return pd.to_datetime(
+            value_str[:10],
+            format="%Y-%m-%d",
+            errors="coerce"
+        )
 
-    # Format like 20260330
+    # Handles 2026/05/01 exactly as YYYY/MM/DD
+    if "/" in value_str and len(value_str) >= 10:
+        parts = value_str[:10].split("/")
+
+        if len(parts) == 3 and len(parts[0]) == 4:
+            return pd.to_datetime(
+                value_str[:10],
+                format="%Y/%m/%d",
+                errors="coerce"
+            )
+
+    # Handles 20260330
     if value_str.isdigit() and len(value_str) == 8:
-
         return pd.to_datetime(
             value_str,
             format="%Y%m%d",
             errors="coerce"
         )
 
-    # Excel serial number stored as string
+    # Excel serial number stored as text
     if value_str.isdigit():
-
         number = int(value_str)
 
         if number > 1000:
-
             return pd.to_datetime(
                 number,
                 unit="D",
@@ -111,10 +121,7 @@ def convert_date_to_ddmmyyyy(value):
                 errors="coerce"
             )
 
-    # Handles:
-    # 2026/05/01
-    # 01/05/2026
-    # 2026-05-01
+    # Handles normal UK date like 01/05/2026
     return pd.to_datetime(
         value_str,
         errors="coerce",
