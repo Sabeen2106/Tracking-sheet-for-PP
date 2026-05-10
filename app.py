@@ -63,28 +63,63 @@ def map_pallet_type(value):
     return value
     
 def convert_date_to_ddmmyyyy(value):
+
     if pd.isna(value):
         return pd.NaT
 
+    # Excel serial number like 46139
+    if isinstance(value, (int, float)):
+
+        if value > 1000:
+
+            return pd.to_datetime(
+                value,
+                unit="D",
+                origin="1899-12-30",
+                errors="coerce"
+            )
+
     value_str = str(value).strip()
 
+    # Remove .0
     if value_str.endswith(".0"):
         value_str = value_str[:-2]
 
+    # Replace - with /
+    value_str = value_str.replace("-", "/")
+
     # Format like 20260330
     if value_str.isdigit() and len(value_str) == 8:
+
         return pd.to_datetime(
             value_str,
             format="%Y%m%d",
             errors="coerce"
         )
 
+    # Excel serial number stored as string
+    if value_str.isdigit():
+
+        number = int(value_str)
+
+        if number > 1000:
+
+            return pd.to_datetime(
+                number,
+                unit="D",
+                origin="1899-12-30",
+                errors="coerce"
+            )
+
+    # Handles:
+    # 2026/05/01
+    # 01/05/2026
+    # 2026-05-01
     return pd.to_datetime(
-        value,
+        value_str,
         errors="coerce",
         dayfirst=True
     )
-
 
 def clean_reference_number(value):
     value = str(value).strip()
