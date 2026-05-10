@@ -61,19 +61,7 @@ def map_pallet_type(value):
         return "CHEP 08 - Half"
 
     return value
-# =========================
-# QUANTITY
-# =========================
-work_df["Quantity"] = pd.to_numeric(
-    work_df[quantity_col],
-    errors="coerce"
-).fillna(0)
-
-# Remove rows where quantity is 0
-work_df = work_df[
-    work_df["Quantity"] != 0
-].copy()
-
+    
 def convert_date_to_ddmmyyyy(value):
     if pd.isna(value):
         return pd.NaT
@@ -454,9 +442,14 @@ if main_file:
         # QUANTITY
         # =========================
         work_df["Quantity"] = pd.to_numeric(
-            work_df[quantity_col],
-            errors="coerce"
+        work_df[quantity_col],
+        errors="coerce"
         ).fillna(0)
+
+        # Remove rows where quantity is 0
+        work_df = work_df[
+        work_df["Quantity"] != 0
+        ].copy()
 
         # =========================
         # PALLET TYPE
