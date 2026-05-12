@@ -122,6 +122,23 @@ def is_missing_gid(series):
         | (series.astype(str).str.lower().str.strip() == "nan")
     )
 
+def safe_format_date(value):
+    try:
+        if pd.isna(value):
+            return ""
+
+        value = pd.to_datetime(value, errors="coerce")
+
+        if pd.isna(value):
+            return ""
+
+        if value.year < 2000 or value.year > 2100:
+            return ""
+
+        return value.strftime("%d/%m/%Y")
+
+    except Exception:
+        return ""
 
 def excel_buffer(df):
     buffer = BytesIO()
