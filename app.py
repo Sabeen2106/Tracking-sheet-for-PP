@@ -31,7 +31,7 @@ def map_pallet_type(value):
     if "PALLET 1000X1200 MM" in value or "1-B1210A" in value or value in ["01", "UK", "1"]:
         return "CHEP 01 - UK"
 
-    if "3-B1208A" in value or value in ["03", "EUR", "EURO", "CHEP 80", "3"]:
+    if "3-B1208A" in value or value in ["03", "EUR", "EURO", "CHEP 80", "3", "Chep Euro"]:
         return "CHEP 03 - Euro"
 
     if "8-B0806A" in value or value == "08":
