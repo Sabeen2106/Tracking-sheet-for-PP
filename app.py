@@ -461,14 +461,13 @@ if main_file:
         # =========================
         # DATE
         # =========================
-        work_df["Movement Date Parsed"] = (
-            work_df[movement_date_col]
-            .apply(convert_date_to_ddmmyyyy)
+        work_df["Movement Date Parsed"] = pd.to_datetime(
+        work_df["Movement Date Parsed"],
+        errors="coerce"
         )
 
-        work_df["Movement Date"] = (
-            work_df["Movement Date Parsed"]
-            .dt.strftime("%d/%m/%Y")
+        work_df["Movement Date"] = work_df["Movement Date Parsed"].apply(
+        lambda x: x.strftime("%d/%m/%Y") if pd.notna(x) else ""
         )
 
         # =========================
