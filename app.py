@@ -244,10 +244,9 @@ if main_file:
             errors="coerce"
         )
 
-        work_df["Movement Date"] = work_df["Movement Date Parsed"].apply(
-            lambda x: x.strftime("%d/%m/%Y") if pd.notna(x) else ""
-        )
+        work_df["Movement Date"] = work_df["Movement Date Parsed"].apply(safe_format_date)
 
+        
         work_df["Quantity"] = pd.to_numeric(
             work_df[quantity_col],
             errors="coerce"
@@ -428,7 +427,7 @@ if "work_df" in st.session_state:
                 )
 
                 work_df.loc[idx, "Movement Date Parsed"] = pd.to_datetime(new_date)
-                work_df.loc[idx, "Movement Date"] = pd.to_datetime(new_date).strftime("%d/%m/%Y")
+                work_df.loc[idx, "Movement Date"] = safe_format_date(new_date)
 
     missing_gid_df = work_df[is_missing_gid(work_df["GID"])].copy()
 
