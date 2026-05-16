@@ -28,10 +28,17 @@ def clean_columns(df):
 def map_pallet_type(value):
     value = str(value).strip().upper()
 
-    if "PALLET 1000X1200 MM" in value or "1-B1210A" in value or value in ["01", "UK", "1"]:
+    if (
+        "PALLET 1000X1200 MM" in value
+        or "1-B1210A" in value
+        or value in ["01", "UK", "1"]
+    ):
         return "CHEP 01 - UK"
 
-    if "3-B1208A" in value or value in ["03", "EUR", "EURO", "CHEP 80", "3", "Chep Euro"]:
+    if (
+        "3-B1208A" in value
+        or value in ["03", "EUR", "EURO", "CHEP 80", "3", "CHEP EURO"]
+    ):
         return "CHEP 03 - Euro"
 
     if "8-B0806A" in value or value == "08":
@@ -50,19 +57,29 @@ def convert_date_to_ddmmyyyy(value):
         if value_str.endswith(".0"):
             value_str = value_str[:-2]
 
-        # Handles 20260427
+        # 20260427
         if value_str.isdigit() and len(value_str) == 8:
+            year_start = int(value_str[:4])
+
+            if year_start > 1900:
+                return pd.Timestamp(
+                    year=int(value_str[0:4]),
+                    month=int(value_str[4:6]),
+                    day=int(value_str[6:8])
+                )
+
+            # 02052026
             return pd.Timestamp(
-                year=int(value_str[0:4]),
-                month=int(value_str[4:6]),
-                day=int(value_str[6:8])
+                year=int(value_str[4:8]),
+                month=int(value_str[2:4]),
+                day=int(value_str[0:2])
             )
 
-        # Handles 270426
+        # 270426
         if value_str.isdigit() and len(value_str) == 6:
             return pd.to_datetime(value_str, format="%d%m%y", errors="coerce")
 
-        # Handles Excel serial date like 46139
+        # Excel serial date like 46139
         if value_str.isdigit() and len(value_str) == 5:
             return pd.to_datetime(
                 int(value_str),
@@ -71,12 +88,13 @@ def convert_date_to_ddmmyyyy(value):
                 errors="coerce"
             )
 
-        # Handles 2026-04-27 or 2026/04/27
         if len(value_str) >= 10:
-            date_part = value_str[:10]
+            date_part = value_str[:11].strip()
 
+            # 2026-05-02 or 02-05-2026 or 02-May-2026
             if "-" in date_part:
                 parts = date_part.split("-")
+
                 if len(parts) == 3 and len(parts[0]) == 4:
                     return pd.Timestamp(
                         year=int(parts[0]),
@@ -84,8 +102,17 @@ def convert_date_to_ddmmyyyy(value):
                         day=int(parts[2])
                     )
 
+                if len(parts) == 3 and len(parts[2]) == 4:
+                    return pd.to_datetime(
+                        date_part,
+                        errors="coerce",
+                        dayfirst=True
+                    )
+
+            # 2026/05/02 or 02/05/2026
             if "/" in date_part:
                 parts = date_part.split("/")
+
                 if len(parts) == 3 and len(parts[0]) == 4:
                     return pd.Timestamp(
                         year=int(parts[0]),
@@ -93,10 +120,38 @@ def convert_date_to_ddmmyyyy(value):
                         day=int(parts[2])
                     )
 
+                if len(parts) == 3 and len(parts[2]) == 4:
+                    return pd.Timestamp(
+                        year=int(parts[2]),
+                        month=int(parts[1]),
+                        day=int(parts[0])
+                    )
+
+        # 02 May 2026, 02-May-2026, etc.
         return pd.to_datetime(value_str, errors="coerce", dayfirst=True)
 
     except Exception:
         return pd.NaT
+
+
+def safe_format_date(value):
+    try:
+        if pd.isna(value):
+            return ""
+
+        value = pd.to_datetime(value, errors="coerce")
+
+        if pd.isna(value):
+            return ""
+
+        if value.year < 2000 or value.year > 2100:
+            return ""
+
+        return value.strftime("%d/%m/%Y")
+
+    except Exception:
+        return ""
+
 
 def clean_reference_number(value):
     value = str(value).strip()
@@ -139,23 +194,6 @@ def is_missing_gid(series):
         | (series.astype(str).str.lower().str.strip() == "nan")
     )
 
-def safe_format_date(value):
-    try:
-        if pd.isna(value):
-            return ""
-
-        value = pd.to_datetime(value, errors="coerce")
-
-        if pd.isna(value):
-            return ""
-
-        if value.year < 2000 or value.year > 2100:
-            return ""
-
-        return value.strftime("%d/%m/%Y")
-
-    except Exception:
-        return ""
 
 def excel_buffer(df):
     buffer = BytesIO()
@@ -272,15 +310,9 @@ if main_file:
         work_df = df.copy()
 
         work_df["Movement Date Parsed"] = work_df[movement_date_col].apply(convert_date_to_ddmmyyyy)
-
-        work_df["Movement Date Parsed"] = pd.to_datetime(
-            work_df["Movement Date Parsed"],
-            errors="coerce"
-        )
-
+        work_df["Movement Date Parsed"] = pd.to_datetime(work_df["Movement Date Parsed"], errors="coerce")
         work_df["Movement Date"] = work_df["Movement Date Parsed"].apply(safe_format_date)
 
-        
         work_df["Quantity"] = pd.to_numeric(
             work_df[quantity_col],
             errors="coerce"
@@ -289,14 +321,13 @@ if main_file:
         work_df = work_df[work_df["Quantity"] != 0].copy()
 
         work_df["Pallet Type"] = work_df[pallet_type_col].apply(map_pallet_type)
-
         work_df["Reference"] = work_df[reference_col].apply(clean_reference_number)
 
         if business_unit == "Spain":
             spain_split = work_df[customer_col].apply(split_spain_customer_gid)
 
             work_df["Customer"] = spain_split["Customer"]
-            work_df["GID"] = spain_split["GID"]
+            work_df["GID"] = spain_split["GID"].astype("string")
 
             st.session_state["work_df"] = work_df
             st.session_state["need_lookup_mapping"] = False
@@ -305,7 +336,7 @@ if main_file:
             work_df["Customer"] = work_df[customer_col].astype(str).str.strip()
 
             if gid_available == "Yes":
-                work_df["GID"] = work_df[gid_col]
+                work_df["GID"] = work_df[gid_col].astype("string")
                 st.session_state["work_df"] = work_df
                 st.session_state["need_lookup_mapping"] = False
 
@@ -366,22 +397,23 @@ if st.session_state.get("need_lookup_mapping", False):
 
             lookup_df = lookup_df[["Address Match Key", lookup_gid_col]].copy()
 
-            lookup_df.rename(columns={
-                lookup_gid_col: "GID"
-            }, inplace=True)
+            lookup_df.rename(columns={lookup_gid_col: "GID"}, inplace=True)
 
             lookup_df = lookup_df.dropna(subset=["Address Match Key"])
-
             lookup_df = lookup_df.drop_duplicates(
                 subset=["Address Match Key"],
                 keep="first"
             )
+
+            lookup_df["GID"] = lookup_df["GID"].astype("string")
 
             work_df = work_df.merge(
                 lookup_df,
                 on="Address Match Key",
                 how="left"
             )
+
+            work_df["GID"] = work_df["GID"].astype("string")
 
             st.session_state["work_df"] = work_df
             st.session_state["need_lookup_mapping"] = False
@@ -410,9 +442,9 @@ if st.session_state.get("need_lookup_mapping", False):
             }, inplace=True)
 
             lookup_df["Customer"] = lookup_df["Customer"].astype(str).str.strip()
+            lookup_df["GID"] = lookup_df["GID"].astype("string")
 
             lookup_df = lookup_df.dropna(subset=["Customer"])
-
             lookup_df = lookup_df.drop_duplicates(
                 subset=["Customer"],
                 keep="first"
@@ -423,6 +455,8 @@ if st.session_state.get("need_lookup_mapping", False):
                 on="Customer",
                 how="left"
             )
+
+            work_df["GID"] = work_df["GID"].astype("string")
 
             st.session_state["work_df"] = work_df
             st.session_state["need_lookup_mapping"] = False
@@ -440,82 +474,128 @@ if "work_df" in st.session_state:
     old_date_df = work_df[work_df["Days Old"] > 89].copy()
 
     if not old_date_df.empty:
-        st.warning("Some movement dates are more than 89 days old.")
-        st.subheader("Review Dates More Than 89 Days Old")
+        st.warning("Some movement dates exceed the CHEP processing window.")
+        st.subheader("Review Dates Over 89 Days")
 
-        for idx, row in old_date_df.iterrows():
-            reference = row["Reference"]
-            old_date = row["Movement Date"]
+        unique_old_dates = old_date_df[["Reference", "Movement Date"]].drop_duplicates()
 
-            st.write(f"Reference Number {reference} has date {old_date}")
+        for _, old_row in unique_old_dates.iterrows():
+            reference = old_row["Reference"]
+            old_date = old_row["Movement Date"]
+
+            st.error(
+                f"Reference {reference}: {old_date} exceeds 89 days. "
+                "CHEP late declaration charges may apply."
+            )
 
             amend_date = st.checkbox(
                 f"Amend date for reference {reference}",
-                key=f"amend_date_{idx}"
+                key=f"amend_date_{reference}"
             )
 
             if amend_date:
                 new_date = st.date_input(
-                    f"Enter new date for reference {reference}",
-                    key=f"new_date_{idx}"
+                    f"Enter revised date for reference {reference}",
+                    key=f"new_date_{reference}"
                 )
 
-                work_df.loc[idx, "Movement Date Parsed"] = pd.to_datetime(new_date)
-                work_df.loc[idx, "Movement Date"] = safe_format_date(new_date)
+                work_df.loc[
+                    work_df["Reference"] == reference,
+                    "Movement Date Parsed"
+                ] = pd.to_datetime(new_date)
+
+                work_df.loc[
+                    work_df["Reference"] == reference,
+                    "Movement Date"
+                ] = safe_format_date(new_date)
 
     missing_gid_df = work_df[is_missing_gid(work_df["GID"])].copy()
 
     gid_inputs = {}
-    remove_rows = []
+    remove_keys = []
 
     if not missing_gid_df.empty:
         st.warning("Some rows are missing GID / Location ID.")
         st.subheader("Missing GID Input by Customer and Reference")
 
-        for idx, row in missing_gid_df.iterrows():
-            customer = row["Customer"]
+        unique_missing = missing_gid_df[
+            ["Reference", "Customer"]
+        ].drop_duplicates()
+
+        for _, row in unique_missing.iterrows():
             reference = row["Reference"]
-            quantity = row["Quantity"]
-            movement_date = row["Movement Date"]
+            customer = row["Customer"]
+
+            related_rows = missing_gid_df[
+                (missing_gid_df["Reference"] == reference)
+                & (missing_gid_df["Customer"] == customer)
+            ]
+
+            total_quantity = related_rows["Quantity"].sum()
+            movement_date = related_rows["Movement Date"].iloc[0]
+
+            gid_key = f"{reference}|||{customer}"
 
             with st.container():
                 st.markdown("---")
                 st.write(f"Customer: {customer}")
                 st.write(f"Reference Number: {reference}")
                 st.write(f"Movement Date: {movement_date}")
-                st.write(f"Quantity: {quantity}")
+                st.write(f"Total Quantity: {total_quantity}")
 
-                gid_inputs[idx] = st.text_input(
-                    "Please enter GID for this row",
-                    key=f"gid_input_{idx}"
+                gid_inputs[gid_key] = st.text_input(
+                    "Please enter GID for this reference",
+                    key=f"gid_input_{gid_key}"
                 )
 
                 remove = st.checkbox(
-                    "GID not found - remove this row",
-                    key=f"remove_row_{idx}"
+                    "GID not found - remove this reference",
+                    key=f"remove_row_{gid_key}"
                 )
 
                 if remove:
-                    remove_rows.append(idx)
+                    remove_keys.append(gid_key)
 
     else:
         st.success("No missing GIDs found.")
 
     if st.button("Generate Final Files"):
-        for idx, gid_value in gid_inputs.items():
-            if gid_value.strip():
-                work_df.loc[idx, "GID"] = gid_value.strip()
+        work_df["GID"] = work_df["GID"].astype("string")
 
-        removed_rows_df = work_df.loc[remove_rows].copy()
+        for gid_key, gid_value in gid_inputs.items():
+            gid_value = str(gid_value).strip()
+
+            if gid_value:
+                reference, customer = gid_key.split("|||", 1)
+
+                work_df.loc[
+                    (work_df["Reference"] == reference)
+                    & (work_df["Customer"] == customer),
+                    "GID"
+                ] = gid_value
+
+        remove_indexes = []
+
+        for gid_key in remove_keys:
+            reference, customer = gid_key.split("|||", 1)
+
+            matched_indexes = work_df[
+                (work_df["Reference"] == reference)
+                & (work_df["Customer"] == customer)
+            ].index.tolist()
+
+            remove_indexes.extend(matched_indexes)
+
+        removed_rows_df = work_df.loc[remove_indexes].copy()
 
         gid_required_df = work_df[
             is_missing_gid(work_df["GID"])
-            & ~work_df.index.isin(remove_rows)
+            & ~work_df.index.isin(remove_indexes)
         ].copy()
 
         final_df = work_df[
             ~is_missing_gid(work_df["GID"])
-            & ~work_df.index.isin(remove_rows)
+            & ~work_df.index.isin(remove_indexes)
         ].copy()
 
         tracking_df = build_tracking_file(final_df, business_unit, pooler, batch_number)
@@ -530,14 +610,7 @@ if "work_df" in st.session_state:
             file_name=f"{batch_number}_tracking_sheet.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
-        st.download_button(
-            label="Download GID Required File",
-            data=excel_buffer(gid_required_tracking_df),
-            file_name=f"{batch_number}_gid_required.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
+       
         st.download_button(
             label="Download Removed Rows",
             data=excel_buffer(removed_tracking_df),
