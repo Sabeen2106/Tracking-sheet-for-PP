@@ -25,6 +25,18 @@ def clean_columns(df):
     return df
 
 
+def clean_gid(value):
+    if pd.isna(value):
+        return ""
+
+    value = str(value).strip()
+
+    if value.endswith(".0"):
+        value = value[:-2]
+
+    return value
+
+
 def map_pallet_type(value):
     value = str(value).strip().upper()
 
@@ -57,7 +69,6 @@ def convert_date_to_ddmmyyyy(value):
         if value_str.endswith(".0"):
             value_str = value_str[:-2]
 
-        # 20260427
         if value_str.isdigit() and len(value_str) == 8:
             year_start = int(value_str[:4])
 
@@ -68,18 +79,15 @@ def convert_date_to_ddmmyyyy(value):
                     day=int(value_str[6:8])
                 )
 
-            # 02052026
             return pd.Timestamp(
                 year=int(value_str[4:8]),
                 month=int(value_str[2:4]),
                 day=int(value_str[0:2])
             )
 
-        # 270426
         if value_str.isdigit() and len(value_str) == 6:
             return pd.to_datetime(value_str, format="%d%m%y", errors="coerce")
 
-        # Excel serial date like 46139
         if value_str.isdigit() and len(value_str) == 5:
             return pd.to_datetime(
                 int(value_str),
@@ -91,7 +99,6 @@ def convert_date_to_ddmmyyyy(value):
         if len(value_str) >= 10:
             date_part = value_str[:11].strip()
 
-            # 2026-05-02 or 02-05-2026 or 02-May-2026
             if "-" in date_part:
                 parts = date_part.split("-")
 
@@ -109,7 +116,6 @@ def convert_date_to_ddmmyyyy(value):
                         dayfirst=True
                     )
 
-            # 2026/05/02 or 02/05/2026
             if "/" in date_part:
                 parts = date_part.split("/")
 
@@ -127,7 +133,6 @@ def convert_date_to_ddmmyyyy(value):
                         day=int(parts[0])
                     )
 
-        # 02 May 2026, 02-May-2026, etc.
         return pd.to_datetime(value_str, errors="coerce", dayfirst=True)
 
     except Exception:
@@ -178,7 +183,7 @@ def split_spain_customer_gid(value):
     if match:
         return pd.Series({
             "Customer": match.group(2).strip().lstrip("-").strip(),
-            "GID": match.group(1).strip()
+            "GID": clean_gid(match.group(1).strip())
         })
 
     return pd.Series({
@@ -215,6 +220,9 @@ def build_tracking_file(final_df, business_unit, pooler, batch_number):
     if final_df.empty:
         return pd.DataFrame(columns=columns)
 
+    final_df = final_df.copy()
+    final_df["GID"] = final_df["GID"].apply(clean_gid).astype("string")
+
     grouped = final_df.groupby(
         ["Reference", "Pallet Type"],
         as_index=False
@@ -239,7 +247,7 @@ def build_tracking_file(final_df, business_unit, pooler, batch_number):
         "Sender Name": business_unit_map[business_unit]["Sender Name"],
         "Sender Town": "",
         "Sender Postcode": "",
-        "Receiver Location Id": grouped["GID"],
+        "Receiver Location Id": grouped["GID"].apply(clean_gid),
         "Receiver Name": grouped["Customer"],
         "Receiver Town": "",
         "Receiver Postcode": "",
@@ -327,7 +335,7 @@ if main_file:
             spain_split = work_df[customer_col].apply(split_spain_customer_gid)
 
             work_df["Customer"] = spain_split["Customer"]
-            work_df["GID"] = spain_split["GID"].astype("string")
+            work_df["GID"] = spain_split["GID"].apply(clean_gid).astype("string")
 
             st.session_state["work_df"] = work_df
             st.session_state["need_lookup_mapping"] = False
@@ -336,7 +344,7 @@ if main_file:
             work_df["Customer"] = work_df[customer_col].astype(str).str.strip()
 
             if gid_available == "Yes":
-                work_df["GID"] = work_df[gid_col].astype("string")
+                work_df["GID"] = work_df[gid_col].apply(clean_gid).astype("string")
                 st.session_state["work_df"] = work_df
                 st.session_state["need_lookup_mapping"] = False
 
@@ -405,7 +413,7 @@ if st.session_state.get("need_lookup_mapping", False):
                 keep="first"
             )
 
-            lookup_df["GID"] = lookup_df["GID"].astype("string")
+            lookup_df["GID"] = lookup_df["GID"].apply(clean_gid).astype("string")
 
             work_df = work_df.merge(
                 lookup_df,
@@ -413,7 +421,7 @@ if st.session_state.get("need_lookup_mapping", False):
                 how="left"
             )
 
-            work_df["GID"] = work_df["GID"].astype("string")
+            work_df["GID"] = work_df["GID"].apply(clean_gid).astype("string")
 
             st.session_state["work_df"] = work_df
             st.session_state["need_lookup_mapping"] = False
@@ -442,7 +450,7 @@ if st.session_state.get("need_lookup_mapping", False):
             }, inplace=True)
 
             lookup_df["Customer"] = lookup_df["Customer"].astype(str).str.strip()
-            lookup_df["GID"] = lookup_df["GID"].astype("string")
+            lookup_df["GID"] = lookup_df["GID"].apply(clean_gid).astype("string")
 
             lookup_df = lookup_df.dropna(subset=["Customer"])
             lookup_df = lookup_df.drop_duplicates(
@@ -456,7 +464,7 @@ if st.session_state.get("need_lookup_mapping", False):
                 how="left"
             )
 
-            work_df["GID"] = work_df["GID"].astype("string")
+            work_df["GID"] = work_df["GID"].apply(clean_gid).astype("string")
 
             st.session_state["work_df"] = work_df
             st.session_state["need_lookup_mapping"] = False
@@ -464,6 +472,7 @@ if st.session_state.get("need_lookup_mapping", False):
 
 if "work_df" in st.session_state:
     work_df = st.session_state["work_df"].copy()
+    work_df["GID"] = work_df["GID"].apply(clean_gid).astype("string")
 
     today = pd.Timestamp.today().normalize()
 
@@ -560,10 +569,10 @@ if "work_df" in st.session_state:
         st.success("No missing GIDs found.")
 
     if st.button("Generate Final Files"):
-        work_df["GID"] = work_df["GID"].astype("string")
+        work_df["GID"] = work_df["GID"].apply(clean_gid).astype("string")
 
         for gid_key, gid_value in gid_inputs.items():
-            gid_value = str(gid_value).strip()
+            gid_value = clean_gid(gid_value)
 
             if gid_value:
                 reference, customer = gid_key.split("|||", 1)
@@ -573,6 +582,8 @@ if "work_df" in st.session_state:
                     & (work_df["Customer"] == customer),
                     "GID"
                 ] = gid_value
+
+        work_df["GID"] = work_df["GID"].apply(clean_gid).astype("string")
 
         remove_indexes = []
 
@@ -610,7 +621,8 @@ if "work_df" in st.session_state:
             file_name=f"{batch_number}_tracking_sheet.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-       
+
+
         st.download_button(
             label="Download Removed Rows",
             data=excel_buffer(removed_tracking_df),
