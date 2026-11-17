@@ -12,7 +12,8 @@ business_unit_map = {
     "Italy": {"Sender Name": "Italy", "Sender Location Id": "0101230808"},
     "Netherlands": {"Sender Name": "Netherlands", "Sender Location Id": "0100646888"},
     "Spain": {"Sender Name": "Spain", "Sender Location Id": "5000449357"},
-    "HQ": {"Sender Name": "HQ", "Sender Location Id": "1000358868"},"Matthew Walker" : {"Sender Name": "Matthew Walker", "Sender Location Id": "101430678"}
+    "HQ": {"Sender Name": "HQ", "Sender Location Id": "1000358868"},
+    "Matthew Walker": {"Sender Name": "Matthew Walker", "Sender Location Id": "101430678"},
     "Coca-Cola HBC Northern Ireland Ltd": {
         "Sender Name": "Coca-Cola HBC Northern Ireland Ltd",
         "Sender Location Id": "5000513592"
